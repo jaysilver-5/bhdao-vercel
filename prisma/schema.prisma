@@ -1,0 +1,204 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  engineType   = "client"   // or "binary" if you want the legacy engine
+  moduleFormat = "cjs"
+  output       = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────
+
+enum Role {
+  MEMBER
+  EXPERT
+  ADMIN
+}
+
+enum ArtifactStatus {
+  PENDING
+  COMMUNITY_REVIEW
+  EXPERT_REVIEW
+  VERIFIED
+  FLAGGED
+  REJECTED
+  WITHDRAWN
+}
+
+enum VoteValue {
+  APPROVE
+  REJECT
+}
+
+enum ExpertDecision {
+  APPROVE
+  REJECT
+}
+
+enum FlagReason {
+  MISINFO
+  COPYRIGHT
+  DUPLICATE
+  OTHER
+}
+
+// ─── User ─────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(uuid())
+  wallet    String   @unique
+  role      Role     @default(MEMBER)
+  createdAt DateTime @default(now())
+
+  artifacts      Artifact[]
+  votes          Vote[]
+  comments       Comment[]
+  expertReviews  ExpertReview[]
+  flags          Flag[]
+  artifactEvents ArtifactEvent[]
+}
+
+// ─── Auth ─────────────────────────────────────────────
+
+model AuthNonce {
+  id        String   @id @default(uuid())
+  wallet    String   @unique
+  nonce     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// ─── Artifact ─────────────────────────────────────────
+
+model Artifact {
+  id          String         @id @default(uuid())
+  title       String
+  description String
+  type        String         // image | audio | video | document | text
+  sourceUrl   String?
+  language    String         @default("en")
+  license     String?
+  tags        String[]       @default([])
+  status      ArtifactStatus @default(PENDING)
+
+  // IPFS
+  cid     String?     // IPFS CID (set after pinning)
+
+  // Cloudinary staging (before IPFS)
+  fileUrl String?     // Cloudinary CDN URL
+  fileId  String?     // Cloudinary public_id (for deletion/management)
+
+  // Polkadot anchoring
+  chainTxHash String?
+  chainBlock  Int?
+  anchoredAt  DateTime?
+
+  // Timestamps
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  reviewEndsAt DateTime?
+
+  // Submitter relation
+  submittedById String
+  submittedBy   User   @relation(fields: [submittedById], references: [id])
+
+  // Child relations
+  votes         Vote[]
+  comments      Comment[]
+  flags         Flag[]
+  expertReviews ExpertReview[]
+  events        ArtifactEvent[]
+
+  @@index([status])
+  @@index([submittedById])
+}
+
+// ─── Vote ─────────────────────────────────────────────
+
+model Vote {
+  id         String    @id @default(uuid())
+  value      VoteValue
+  createdAt  DateTime  @default(now())
+
+  artifactId String
+  artifact   Artifact @relation(fields: [artifactId], references: [id])
+
+  voterId String
+  voter   User   @relation(fields: [voterId], references: [id])
+
+  @@unique([artifactId, voterId])
+}
+
+// ─── Comment ──────────────────────────────────────────
+
+model Comment {
+  id        String   @id @default(uuid())
+  body      String
+  createdAt DateTime @default(now())
+
+  artifactId String
+  artifact   Artifact @relation(fields: [artifactId], references: [id])
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+}
+
+// ─── Flag ─────────────────────────────────────────────
+
+model Flag {
+  id        String     @id @default(uuid())
+  reason    FlagReason
+  details   String?
+  createdAt DateTime   @default(now())
+
+  artifactId String
+  artifact   Artifact @relation(fields: [artifactId], references: [id])
+
+  reporterId String
+  reporter   User   @relation(fields: [reporterId], references: [id])
+
+  @@unique([artifactId, reporterId])
+}
+
+// ─── Expert Review ────────────────────────────────────
+
+model ExpertReview {
+  id        String         @id @default(uuid())
+  decision  ExpertDecision
+  notes     String?
+  checklist Json?
+  createdAt DateTime       @default(now())
+
+  artifactId String
+  artifact   Artifact @relation(fields: [artifactId], references: [id])
+
+  expertId String
+  expert   User   @relation(fields: [expertId], references: [id])
+
+  @@unique([artifactId, expertId])
+}
+
+// ─── Audit Log ────────────────────────────────────────
+
+model ArtifactEvent {
+  id        String   @id @default(uuid())
+  type      String   // SUBMITTED | UPDATED | WITHDRAWN | VOTED | EXPERT_REVIEWED | FLAGGED | STATUS_CHANGE | COMMENTED | PINNED | ANCHORED
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  artifactId String
+  artifact   Artifact @relation(fields: [artifactId], references: [id])
+
+  actorId String
+  actor   User   @relation(fields: [actorId], references: [id])
+
+  @@index([artifactId, createdAt])
+}
